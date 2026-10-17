@@ -7034,7 +7034,9 @@ export class InteractiveMode {
 				return;
 			}
 			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(new ThemedText(() => theme.fg("accent", `✓ New session in ${cwd}`), 1, 1));
+			// "New session" reads as a blank start. Say the conversation came along when it did.
+			const notice = leafId ? `✓ Continued in ${cwd}` : `✓ New session in ${cwd}`;
+			this.chatContainer.addChild(new ThemedText(() => theme.fg("accent", notice), 1, 1));
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			await this.handleFatalRuntimeError("Failed to change directory", error);
