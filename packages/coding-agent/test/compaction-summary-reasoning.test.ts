@@ -5,6 +5,7 @@ import {
 	type CompactionPreparation,
 	compact,
 	completeSummarization,
+	DEFAULT_COMPACTION_SETTINGS,
 	generateSummary,
 	generateSummaryWithUsage,
 } from "../src/core/compaction/index.ts";
@@ -71,6 +72,58 @@ describe("generateSummary reasoning options", () => {
 	beforeEach(() => {
 		completeSimpleMock.mockReset();
 		completeSimpleMock.mockResolvedValue(mockSummaryResponse);
+	});
+
+	it("shortens an over-budget previous summary instead of asking to preserve it", async () => {
+		const done = Array.from({ length: 50 }, (_, i) => `- [x] item ${i} ${"d".repeat(700)}`).join("\n");
+		const previous = `## Goal\nKeep\n\n### Done\n${done}\n\n---\n\n**Turn Context (split turn):**\n\n## Original Request\nDo it\n\n<read-files>\na.ts\n</read-files>`;
+		expect(previous.length).toBeGreaterThan(32_000);
+
+		await generateSummaryWithUsage(
+			messages,
+			createModel(false),
+			undefined,
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			previous,
+		);
+
+		const context = completeSimpleMock.mock.calls[0][1] as {
+			messages: { role: string; content?: { type: string; text?: string }[] }[];
+		};
+		const user = context.messages.find((message) => message.role === "user");
+		const prompt = user?.content?.find((block) => block.type === "text")?.text ?? "";
+		expect(prompt).not.toContain("PRESERVE all existing information");
+		expect(prompt).toContain("32000");
+		const shown = prompt.split("<previous-summary>\n")[1]?.split("\n</previous-summary>")[0] ?? "";
+		expect(shown.length).toBeLessThanOrEqual(32_000);
+		expect(shown).toContain("**Turn Context (split turn):**");
+		expect(shown).toContain("<read-files>");
+		expect(shown).not.toContain("item 0 ");
+	});
+
+	it("fits a too-long summary, including file lists appended after the model returns", async () => {
+		completeSimpleMock.mockResolvedValue({
+			...mockSummaryResponse,
+			content: [{ type: "text", text: `## Goal\n${"x".repeat(40_000)}` }],
+		});
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 1_000,
+			fileOps: { read: new Set(["src/a.ts"]), written: new Set(), edited: new Set(["src/b.ts"]) },
+			settings: DEFAULT_COMPACTION_SETTINGS,
+		};
+
+		const result = await compact(preparation, createModel(false), "test-key");
+
+		expect(result.summary.length).toBeLessThanOrEqual(32_000);
+		expect(result.summary).toContain("<read-files>");
+		expect(result.summary).toContain("src/b.ts");
 	});
 
 	it("uses the provided thinking level for reasoning-capable models", async () => {

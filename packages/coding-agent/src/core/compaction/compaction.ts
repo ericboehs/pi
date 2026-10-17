@@ -35,6 +35,13 @@ import {
 } from "../session-manager.ts";
 import { combineUsage } from "../usage-totals.ts";
 import {
+	fitSummary,
+	promptSummary,
+	SUMMARY_CHAR_CEILING,
+	summaryBudget,
+	updateSummaryInstruction,
+} from "./summary-budget.ts";
+import {
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
@@ -535,48 +542,42 @@ Use this EXACT format:
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise. Preserve exact file paths, function names, and error messages. Keep the whole summary under ${SUMMARY_CHAR_CEILING} characters.`;
 
-const UPDATE_SUMMARIZATION_INSTRUCTIONS = `Update the existing structured summary with new information. RULES:
-- PRESERVE all existing information from the previous summary
-- ADD new progress, decisions, and context from the new messages
-- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
-- UPDATE "Next Steps" based on what was accomplished
-- PRESERVE exact file paths, function names, and error messages
-- If something is no longer relevant, you may remove it
+function updateSummarizationPrompt(budget: number): string {
+	return `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+
+${updateSummaryInstruction(budget)}
 
 Use this EXACT format:
 
 ## Goal
-[Preserve existing goals, add new ones if the task expanded]
+[Keep the current goal. Add a new one only if the task expanded.]
 
 ## Constraints & Preferences
-- [Preserve existing, add new ones discovered]
+- [Keep constraints that are still in force. Add new ones.]
 
 ## Progress
 ### Done
-- [x] [Include previously done items AND newly completed items]
+- [x] [Recent completed work. Fold older items into one line when the list is long.]
 
 ### In Progress
-- [ ] [Current work - update based on progress]
+- [ ] [Current work]
 
 ### Blocked
-- [Current blockers - remove if resolved]
+- [Current blockers. Remove resolved ones.]
 
 ## Key Decisions
-- **[Decision]**: [Brief rationale] (preserve all previous, add new)
+- **[Decision]**: [Brief rationale] (keep decisions still in force, add new)
 
 ## Next Steps
 1. [Update based on current state]
 
 ## Critical Context
-- [Preserve important context, add new if needed]
+- [Context still needed to continue. Drop stale notes.]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
-
-const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
-
-${UPDATE_SUMMARIZATION_INSTRUCTIONS}`;
+Keep each section concise. Preserve exact file paths, function names, and error messages. The character limit is ${budget}.`;
+}
 
 /**
  * Returns an error message when a summarization response cannot safely be persisted.
@@ -710,8 +711,12 @@ export async function generateSummaryWithUsage(
 	callbacks?: RetryCallbacks,
 	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
-	// Use update prompt if we have a previous summary, otherwise initial prompt
-	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+	// Use update prompt if we have a previous summary, otherwise initial prompt.
+	// An over-budget previous summary is shortened before it is shown, so the
+	// model is not asked to re-emit a checkpoint that already cannot fit.
+	const budget = summaryBudget(previousSummary?.length ?? 0);
+	const shownSummary = promptSummary(previousSummary, budget);
+	let basePrompt = shownSummary ? updateSummarizationPrompt(budget) : SUMMARIZATION_PROMPT;
 	if (customInstructions) {
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
 	}
@@ -723,8 +728,8 @@ export async function generateSummaryWithUsage(
 
 	// Build the prompt with conversation wrapped in tags
 	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-	if (previousSummary) {
-		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+	if (shownSummary) {
+		promptText += `<previous-summary>\n${shownSummary}\n</previous-summary>\n\n`;
 	}
 	promptText += basePrompt;
 
@@ -747,7 +752,7 @@ export async function generateSummaryWithUsage(
 		throw new Error("Summarization attempted to call a tool");
 	}
 
-	const textContent = contentText(response.content);
+	const textContent = fitSummary(contentText(response.content), budget);
 
 	return { text: textContent, usage: response.usage };
 }
@@ -1038,9 +1043,12 @@ export async function compact(
 		summaryUsage = result.usage;
 	}
 
-	// Compute file lists and append to summary
+	// Compute file lists and append to summary, then enforce the growth cap.
+	// File lists and a split-turn block are appended after the model returns,
+	// so the fit has to happen on the text that is actually persisted.
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	summary += formatFileOperations(readFiles, modifiedFiles);
+	summary = fitSummary(summary, summaryBudget(previousSummary?.length ?? 0));
 
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no UUID - session may need migration");
