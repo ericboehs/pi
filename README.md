@@ -12,6 +12,9 @@
 
 # Pi
 
+> **This is [ericboehs](https://github.com/ericboehs)'s fork.** `main` carries the upstream code plus the additions below; issues and PRs for them belong here, not upstream. See [What's different from upstream](#whats-different-from-upstream) at the bottom of this README for the current diff.
+
+
 Pi is a minimal, extensible agent harness that you can make your own.
 
 Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
@@ -204,3 +207,13 @@ MIT
   <br /><br />
   <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
 </p>
+
+## What's different from upstream
+
+`main` in this fork tracks [`earendil-works/pi`](https://github.com/earendil-works/pi) `main` and adds:
+
+- **`/cd <dir>`** — start a new session in another directory without losing this one, and carry the conversation across the move. `packages/coding-agent/src/core/commands/cd.ts`, plus the follow-up fix that says "continued the conversation".
+- **zstd-compressed Anthropic requests** — Anthropic Messages request bodies are zstd-compressed when the provider supports it (GitHub Copilot does, including VA's Vertex-backed Copilot). A ~535 KB body uploads ~100 ms faster per turn. Falls back to uncompressed on a 400/415, and remembers the rejection per base URL. Opt out with `compat.requestCompression: "none"`. `packages/ai/src/utils/zstd.ts`, wired in `packages/ai/src/api/anthropic-messages.ts`.
+- **Smaller resized images** — when Pi resizes an image it now keeps the smaller of PNG and JPEG instead of the first encoding that fits under the limit, which used to keep PNG for photos (often several times larger than the JPEG). `packages/coding-agent/src/utils/image-resize-core.ts`.
+
+Everything else follows upstream `main`; this fork is kept current by merging it in.
