@@ -172,6 +172,7 @@ Also applies to `azure-openai-responses` and `openai-codex-responses`.
 | `supportsMidConvoEffort` | boolean | `false` | Whether the exact model transport supports effort-only system messages and thinking binding controls. |
 | `supportsMidConvoSystemMessages` | boolean | `false` | Whether the exact model accepts system-role messages inside the conversation. When false, later system messages are folded into the top-level system prompt. |
 | `supportsMidConvoToolChanges` | boolean | `false` | Whether the exact model accepts mid-conversation tool_addition and tool_removal blocks. Requires supportsMidConvoSystemMessages. |
+| `requestCompression` | `"none" \| "zstd"` |  | Request body compression. "zstd" sends Content-Encoding: zstd bodies when the runtime supports it (Node.js, Bun); if the endpoint rejects a compressed request with HTTP 400 or 415, pi retries it once uncompressed and, when that retry is accepted, stops compressing for that base URL until restart. Default: "zstd" for github-copilot, "none" otherwise. |
 | `allowedFallbackModels` | `object[]` |  | Models Anthropic accepts for server-side refusal fallback, with local pricing metadata for returned fallback responses. When absent or empty, callers must omit fallbacks; Anthropic rejects the field for models with no permitted fallback targets. |
 
 ### `bedrock-converse-stream`

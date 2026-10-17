@@ -489,6 +489,12 @@ export const AnthropicMessagesCompatSchema = Type.Object(
 				default: false,
 			}),
 		),
+		requestCompression: Type.Optional(
+			Type.Union([Type.Literal("none"), Type.Literal("zstd")], {
+				description:
+					'Request body compression. "zstd" sends Content-Encoding: zstd bodies when the runtime supports it (Node.js, Bun); if the endpoint rejects a compressed request with HTTP 400 or 415, pi retries it once uncompressed and, when that retry is accepted, stops compressing for that base URL until restart. Default: "zstd" for github-copilot, "none" otherwise.',
+			}),
+		),
 		allowedFallbackModels: Type.Optional(
 			Type.Array(AnthropicAllowedFallbackModelSchema, {
 				maxItems: 3,

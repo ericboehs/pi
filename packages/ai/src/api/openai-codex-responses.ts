@@ -1,4 +1,3 @@
-import type * as NodeZlib from "node:zlib";
 import type {
 	Tool as OpenAITool,
 	ResponseCreateParamsStreaming,
@@ -40,6 +39,7 @@ import {
 	resolveTranscriptTools,
 } from "../utils/transcript.ts";
 import { uuidv7 } from "../utils/uuid.ts";
+import { compressRequestBodyZstd } from "../utils/zstd.ts";
 import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
@@ -55,9 +55,6 @@ const DEFAULT_MAX_RETRIES = 0;
 const BASE_DELAY_MS = 1000;
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
-// The Codex backend accepts zstd-compressed request bodies on the SSE responses
-// endpoint (the same endpoint the official Codex client compresses against).
-const REQUEST_COMPRESSION_ZSTD_LEVEL = 3;
 const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
 const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
@@ -195,40 +192,6 @@ function normalizeTimeoutMs(value: number | undefined): number | undefined {
 		throw new Error(`Invalid timeoutMs: ${String(value)}`);
 	}
 	return Math.floor(value);
-}
-
-// ============================================================================
-// Request Compression
-// ============================================================================
-
-type ProcessWithBuiltinModule = typeof process & {
-	getBuiltinModule?: (id: "node:zlib") => typeof NodeZlib;
-};
-
-function loadNodeZlib(): typeof NodeZlib | null {
-	if (typeof process === "undefined" || !(process.versions?.node || process.versions?.bun)) {
-		return null;
-	}
-	return (process as ProcessWithBuiltinModule).getBuiltinModule?.("node:zlib") ?? null;
-}
-
-// Returns the zstd-compressed body bytes, or null when compression is
-// unavailable (browser/Vite builds). Callers fall back to sending the
-// uncompressed JSON when this returns null.
-function compressRequestBodyZstd(bodyJson: string): Uint8Array<ArrayBuffer> | null {
-	const zlib = loadNodeZlib();
-	if (!zlib || typeof zlib.zstdCompressSync !== "function") {
-		return null;
-	}
-	try {
-		const compressed = zlib.zstdCompressSync(bodyJson, {
-			params: { [zlib.constants.ZSTD_c_compressionLevel]: REQUEST_COMPRESSION_ZSTD_LEVEL },
-		});
-		// A copy owns a plain ArrayBuffer, which fetch accepts as a body under every lib.
-		return new Uint8Array(compressed);
-	} catch {
-		return null;
-	}
 }
 
 // ============================================================================
@@ -375,7 +338,8 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 			}
 
 			// Compress the request body once for the SSE path. The Codex backend
-			// decodes Content-Encoding: zstd; the WebSocket transport above sends the
+			// accepts zstd-compressed request bodies on the SSE responses endpoint (the
+			// same endpoint the official Codex client compresses against); the WebSocket transport above sends the
 			// uncompressed JSON frame, matching the official Codex client.
 			const compressedBody = compressRequestBodyZstd(bodyJson);
 			if (compressedBody) {

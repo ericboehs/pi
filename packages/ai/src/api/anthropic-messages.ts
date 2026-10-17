@@ -52,6 +52,7 @@ import {
 	resolveTranscript,
 	type TranscriptContext,
 } from "../utils/transcript.ts";
+import { compressRequestBodyZstd } from "../utils/zstd.ts";
 
 import {
 	getJsonSchemaToolParameters,
@@ -229,6 +230,38 @@ function getAnthropicCompat(model: Model<"anthropic-messages">) {
 		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
 		supportsMidConvoSystemMessages: model.compat?.supportsMidConvoSystemMessages ?? false,
 		supportsMidConvoToolChanges: model.compat?.supportsMidConvoToolChanges ?? false,
+		requestCompression: model.compat?.requestCompression ?? (model.provider === "github-copilot" ? "zstd" : "none"),
+	};
+}
+
+/** Base URLs that rejected a zstd request body. Compression stays off for them until the process exits. */
+const zstdRejectedBaseUrls = new Set<string>();
+
+/**
+ * Wraps fetch so JSON request bodies are sent zstd-compressed. When the
+ * endpoint rejects a compressed body with 400 or 415 (before any response is
+ * streamed), the request is retried once uncompressed. If that retry is not
+ * rejected too, compression is turned off for the base URL.
+ */
+function withZstdRequestCompression(
+	fetchImpl: typeof globalThis.fetch | undefined,
+	baseUrl: string,
+): typeof globalThis.fetch {
+	return async (input, init) => {
+		const send = fetchImpl ?? globalThis.fetch;
+		const body = init?.body;
+		if (typeof body !== "string" || zstdRejectedBaseUrls.has(baseUrl)) return send(input, init);
+		const compressed = compressRequestBodyZstd(body);
+		if (!compressed) return send(input, init);
+		const headers = new Headers(init?.headers);
+		headers.set("content-encoding", "zstd");
+		const response = await send(input, { ...init, headers, body: compressed });
+		if (response.status !== 400 && response.status !== 415) return response;
+		await response.body?.cancel().catch(() => {});
+		const retry = await send(input, init);
+		// A rejected uncompressed retry means the 400/415 was not about compression.
+		if (retry.status !== 400 && retry.status !== 415) zstdRejectedBaseUrls.add(baseUrl);
+		return retry;
 	};
 }
 
@@ -1024,6 +1057,9 @@ function createClient(
 	sessionId?: string,
 	federation?: AnthropicFederationConfig,
 ): { client: Anthropic; isOAuthToken: boolean } {
+	const compat = getAnthropicCompat(model);
+	const clientFetch = compat.requestCompression === "zstd" ? withZstdRequestCompression(fetch, model.baseUrl) : fetch;
+
 	// Copilot: Bearer auth.
 	if (model.provider === "github-copilot") {
 		const client = new PiAnthropic({
@@ -1031,7 +1067,7 @@ function createClient(
 			authToken: apiKey ?? null,
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
-			fetch,
+			fetch: clientFetch,
 			defaultHeaders: mergeClientHeaders(
 				{
 					accept: "application/json",
@@ -1053,7 +1089,7 @@ function createClient(
 			authToken: apiKey,
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
-			fetch,
+			fetch: clientFetch,
 			defaultHeaders: mergeClientHeaders(
 				{
 					accept: "application/json",
@@ -1070,7 +1106,6 @@ function createClient(
 	}
 
 	// API key, header-owned auth, or workload identity federation.
-	const compat = getAnthropicCompat(model);
 	const sessionAffinityHeaders: ProviderHeaders = {};
 	if (sessionId && compat.sendSessionAffinityHeaders) {
 		const header = compat.sessionAffinityFormat === "openrouter" ? "x-session-id" : "x-session-affinity";
@@ -1086,7 +1121,7 @@ function createClient(
 		optionsHeaders,
 	);
 	if (federation) {
-		const key = JSON.stringify([model.baseUrl, federation]);
+		const key = JSON.stringify([model.baseUrl, federation, compat.requestCompression]);
 		if (federationClient?.key !== key || federationClient.fetch !== fetch) {
 			const client = new PiAnthropic({
 				apiKey: null,
@@ -1094,7 +1129,7 @@ function createClient(
 				config: federation,
 				baseURL: model.baseUrl,
 				dangerouslyAllowBrowser: true,
-				fetch,
+				fetch: clientFetch,
 			});
 			federationClient = { key, fetch, client };
 		}
@@ -1106,7 +1141,7 @@ function createClient(
 		authToken: null,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
-		fetch,
+		fetch: clientFetch,
 		defaultHeaders,
 	});
 
