@@ -1629,7 +1629,7 @@ export class SessionManager {
 	 * Useful for extracting a single conversation path from a branched session.
 	 * Returns the new session file path, or undefined if not persisting.
 	 */
-	createBranchedSession(leafId: string): string | undefined {
+	createBranchedSession(leafId: string, relocate?: { cwd: string; sessionDir: string }): string | undefined {
 		const previousSessionFile = this.sessionFile;
 		const path = this.getBranch(leafId);
 		if (path.length === 0) {
@@ -1670,14 +1670,18 @@ export class SessionManager {
 		const newSessionId = createSessionId();
 		const timestamp = new Date().toISOString();
 		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = join(this.getSessionDir(), `${fileTimestamp}_${newSessionId}.jsonl`);
+		const sessionDir = relocate?.sessionDir ?? this.getSessionDir();
+		if (relocate && !existsSync(sessionDir)) {
+			mkdirSync(sessionDir, { recursive: true });
+		}
+		const newSessionFile = join(sessionDir, `${fileTimestamp}_${newSessionId}.jsonl`);
 
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
 			id: newSessionId,
 			timestamp,
-			cwd: this.cwd,
+			cwd: relocate?.cwd ?? this.cwd,
 			parentSession: this.persist ? previousSessionFile : undefined,
 		};
 

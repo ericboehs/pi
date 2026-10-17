@@ -6992,8 +6992,8 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Start a new session in another directory. The transcript stays with the old session;
-	 * the new one re-discovers project resources for the target directory.
+	 * Continue in another directory. The conversation is copied into a new session filed under
+	 * the target directory, which re-discovers that directory's project resources.
 	 */
 	private async handleCdCommand(target: string | undefined): Promise<void> {
 		if (!target) {
@@ -7022,10 +7022,13 @@ export class InteractiveMode {
 
 		this.clearStatusIndicator();
 		try {
-			const result = await this.runtimeHost.newSession({
-				cwd,
-				projectTrustContextFactory: (nextCwd) => this.createProjectTrustContext(nextCwd),
-			});
+			// Carry the conversation across, the way /clone does, but file the copy under the
+			// target directory. With no transcript yet there is nothing to carry, so start fresh.
+			const leafId = this.sessionManager.getLeafId();
+			const trust = (nextCwd: string) => this.createProjectTrustContext(nextCwd);
+			const result = leafId
+				? await this.runtimeHost.fork(leafId, { position: "at", cwd, projectTrustContextFactory: trust })
+				: await this.runtimeHost.newSession({ cwd, projectTrustContextFactory: trust });
 			if (result.cancelled) {
 				this.showStatus("Directory change cancelled");
 				return;

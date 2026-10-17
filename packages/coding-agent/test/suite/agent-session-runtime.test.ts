@@ -323,6 +323,33 @@ describe("AgentSessionRuntime characterization", () => {
 		expect(realpathSync(runtime.cwd)).toBe(realpathSync(otherDir));
 	});
 
+	it("carries the conversation when forking into another working directory", async () => {
+		const { runtime, tempDir } = await createRuntimeForTest((_pi: ExtensionAPI) => {});
+		await runtime.session.prompt("hello");
+		const originalSessionFile = runtime.session.sessionFile;
+		const leafId = runtime.session.sessionManager.getLeafId();
+		expect(leafId).toBeTruthy();
+
+		const otherDir = join(tmpdir(), `pi-runtime-cd-fork-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(otherDir, { recursive: true });
+		cleanups.push(() => {
+			if (existsSync(otherDir)) rmSync(otherDir, { recursive: true, force: true });
+		});
+
+		const result = await runtime.fork(leafId!, { position: "at", cwd: otherDir });
+		expect(result.cancelled).toBe(false);
+		expect(realpathSync(runtime.cwd)).toBe(realpathSync(otherDir));
+		// The transcript comes along, in a new file filed under the target directory.
+		expect(runtime.session.messages.length).toBeGreaterThan(0);
+		expect(runtime.session.messages.some((message) => message.role === "user")).toBe(true);
+		expect(runtime.session.sessionFile).not.toBe(originalSessionFile);
+		expect(runtime.session.sessionManager.getSessionDir()).not.toContain(realpathSync(tempDir));
+		const encodedOtherDir = runtime.cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
+		expect(runtime.session.sessionManager.getSessionDir()).toContain(encodedOtherDir);
+		// The source session is left untouched.
+		expect(existsSync(originalSessionFile!)).toBe(true);
+	});
+
 	it("honors session_before_switch cancellation for new and resume", async () => {
 		const events: RecordedSessionEvent[] = [];
 		let cancelReason: "new" | "resume" | undefined;

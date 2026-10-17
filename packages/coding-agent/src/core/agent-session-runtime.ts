@@ -12,7 +12,7 @@ import type {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
-import { SessionManager } from "./session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 
 /**
  * Result returned by runtime creation.
@@ -272,8 +272,18 @@ export class AgentSessionRuntime {
 
 	async fork(
 		entryId: string,
-		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
+		options?: {
+			position?: "before" | "at";
+			/** Working directory for the forked session. Defaults to the current one. */
+			cwd?: string;
+			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
+		},
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
+		const cwd = options?.cwd ? resolvePath(options.cwd, this.cwd) : this.cwd;
+		if (!existsSync(cwd)) {
+			throw new Error(`Directory not found: ${options?.cwd}`);
+		}
 		const position = options?.position ?? "before";
 		const beforeResult = await this.emitBeforeFork(entryId, { position });
 		if (beforeResult.cancelled) {
@@ -324,17 +334,25 @@ export class AgentSessionRuntime {
 				throw new Error("This session has not been saved yet. Send a message before cloning or forking it.");
 			}
 			const sessionManager = SessionManager.open(currentSessionFile, sessionDir);
-			const forkedSessionPath = sessionManager.createBranchedSession(targetLeafId);
+			// A different cwd gets its own session directory, and the copy records that cwd so it
+			// resumes there. The source manager keeps the source cwd, so the copy is reopened.
+			const relocate =
+				cwd === this.cwd ? undefined : { cwd, sessionDir: getDefaultSessionDir(cwd, this.services.agentDir) };
+			const forkedSessionPath = sessionManager.createBranchedSession(targetLeafId, relocate);
 			if (!forkedSessionPath) {
 				throw new Error("Failed to create forked session");
 			}
-			await this.teardownCurrent("fork", sessionManager.getSessionFile());
+			const forkedSessionManager = relocate
+				? SessionManager.open(forkedSessionPath, relocate.sessionDir)
+				: sessionManager;
+			await this.teardownCurrent("fork", forkedSessionManager.getSessionFile());
 			this.apply(
 				await this.createRuntime({
-					cwd: sessionManager.getCwd(),
+					cwd: forkedSessionManager.getCwd(),
 					agentDir: this.services.agentDir,
-					sessionManager,
+					sessionManager: forkedSessionManager,
 					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+					projectTrustContext: options?.projectTrustContextFactory?.(forkedSessionManager.getCwd()),
 				}),
 			);
 			await this.finishSessionReplacement(options?.withSession);
