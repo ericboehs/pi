@@ -213,7 +213,7 @@ MIT
 `main` in this fork tracks [`earendil-works/pi`](https://github.com/earendil-works/pi) `main` and adds:
 
 - **`/cd <dir>`** — start a new session in another directory without losing this one, and carry the conversation across the move. `packages/coding-agent/src/core/commands/cd.ts`, plus the follow-up fix that says "continued the conversation".
-- **zstd-compressed Anthropic requests** — Anthropic Messages request bodies are zstd-compressed when the provider supports it (GitHub Copilot does, including VA's Vertex-backed Copilot). A ~535 KB body uploads ~100 ms faster per turn. Falls back to uncompressed on a 400/415, and remembers the rejection per base URL. Opt out with `compat.requestCompression: "none"`. `packages/ai/src/utils/zstd.ts`, wired in `packages/ai/src/api/anthropic-messages.ts`.
+- **zstd-compressed Anthropic requests** — Anthropic Messages request bodies are zstd-compressed when the provider supports it (GitHub Copilot does, including private Copilot Enterprise deployments that accept a `zstd` content-encoding). A ~535 KB body uploads ~100 ms faster per turn. Falls back to uncompressed on a 400/415, and remembers the rejection per base URL. Opt out with `compat.requestCompression: "none"`. `packages/ai/src/utils/zstd.ts`, wired in `packages/ai/src/api/anthropic-messages.ts`.
 - **Smaller resized images** — when Pi resizes an image it now keeps the smaller of PNG and JPEG instead of the first encoding that fits under the limit, which used to keep PNG for photos (often several times larger than the JPEG). `packages/coding-agent/src/utils/image-resize-core.ts`.
 
 Everything else follows upstream `main`; this fork is kept current by merging it in.
