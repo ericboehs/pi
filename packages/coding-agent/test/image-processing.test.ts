@@ -5,6 +5,34 @@
 import { describe, expect, it } from "vitest";
 import { convertToPng, loadPngTranscoder } from "../src/utils/image-convert.ts";
 import { formatDimensionNote, resizeImage } from "../src/utils/image-resize.ts";
+import { loadPhoton } from "../src/utils/photon.ts";
+
+/** A photo-like PNG: smooth gradients with per-pixel noise, which PNG compresses poorly and JPEG well. */
+async function photoLikePng(width: number, height: number): Promise<Uint8Array> {
+	const photon = await loadPhoton();
+	if (!photon) throw new Error("photon unavailable");
+	const pixels = new Uint8Array(width * height * 4);
+	let seed = 1;
+	const noise = () => {
+		seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+		return (seed % 41) - 20;
+	};
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const i = (y * width + x) * 4;
+			pixels[i] = Math.max(0, Math.min(255, Math.round((x / width) * 255) + noise()));
+			pixels[i + 1] = Math.max(0, Math.min(255, Math.round((y / height) * 255) + noise()));
+			pixels[i + 2] = Math.max(0, Math.min(255, 128 + noise()));
+			pixels[i + 3] = 255;
+		}
+	}
+	const image = new photon.PhotonImage(pixels, width, height);
+	try {
+		return image.get_bytes();
+	} finally {
+		image.free();
+	}
+}
 
 // Small 2x2 red PNG image (base64) - generated with ImageMagick
 const TINY_PNG =
@@ -136,6 +164,31 @@ describe("resizeImage", () => {
 		expect(result!.originalHeight).toBe(100);
 		expect(result!.width).toBeLessThanOrEqual(50);
 		expect(result!.height).toBeLessThanOrEqual(50);
+	});
+
+	it("should keep JPEG over PNG for a resized photo when JPEG is smaller", async () => {
+		const input = await photoLikePng(400, 300);
+		const result = await resizeImage(input, "image/png", {
+			maxWidth: 200,
+			maxHeight: 200,
+			maxBytes: 4.5 * 1024 * 1024,
+		});
+
+		expect(result).not.toBeNull();
+		expect(result!.wasResized).toBe(true);
+		expect(result!.mimeType).toBe("image/jpeg");
+		expect(result!.data.length).toBeLessThan(Buffer.from(input).toString("base64").length / 2);
+	});
+
+	it("should keep PNG for a resized flat image when PNG is smaller", async () => {
+		const result = await resizeImage(imageBytes(MEDIUM_PNG_100x100), "image/png", {
+			maxWidth: 50,
+			maxHeight: 50,
+			maxBytes: 1024 * 1024,
+		});
+
+		expect(result).not.toBeNull();
+		expect(result!.mimeType).toBe("image/png");
 	});
 
 	it("should resize image exceeding byte limit", async () => {
