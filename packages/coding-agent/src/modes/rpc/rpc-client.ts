@@ -236,12 +236,13 @@ export class RpcClient {
 	}
 
 	/**
-	 * Start a new session, optionally with parent tracking.
-	 * @param parentSession - Optional parent session path for lineage tracking
+	 * Start a new session.
+	 * @param options.parentSession - Optional parent session path for lineage tracking
+	 * @param options.cwd - Optional working directory for the new session
 	 * @returns Object with `cancelled: true` if an extension cancelled the new session
 	 */
-	async newSession(parentSession?: string): Promise<{ cancelled: boolean }> {
-		const response = await this.send({ type: "new_session", parentSession });
+	async newSession(options?: { parentSession?: string; cwd?: string }): Promise<{ cancelled: boolean }> {
+		const response = await this.send({ type: "new_session", ...options });
 		return this.getData(response);
 	}
 

@@ -17,6 +17,7 @@ import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
+	ProjectTrustContext,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
 import {
@@ -310,6 +311,20 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		},
 	});
 
+	/**
+	 * Project trust prompts for a session started in another directory. RPC clients answer
+	 * them through the extension UI protocol, the same way they answer other dialogs.
+	 */
+	const createRpcProjectTrustContext = (cwd: string): ProjectTrustContext => {
+		const ui = createExtensionUIContext();
+		return {
+			cwd,
+			mode: "rpc",
+			hasUI: true,
+			ui: { select: ui.select, confirm: ui.confirm, input: ui.input, notify: ui.notify },
+		};
+	};
+
 	runtimeHost.setRebindSession(async () => {
 		await rebindSession();
 	});
@@ -321,7 +336,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			mode: "rpc",
 			commandContextActions: {
 				waitForIdle: () => session.waitForIdle(),
-				newSession: async (options) => runtimeHost.newSession(options),
+				newSession: async (options) =>
+					runtimeHost.newSession({
+						...options,
+						projectTrustContextFactory: (cwd) => createRpcProjectTrustContext(cwd),
+					}),
 				fork: async (entryId, forkOptions) => {
 					const result = await runtimeHost.fork(entryId, forkOptions);
 					return { cancelled: result.cancelled };
@@ -433,8 +452,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "new_session": {
-				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
-				const result = await runtimeHost.newSession(options);
+				const result = await runtimeHost.newSession({
+					...(command.parentSession ? { parentSession: command.parentSession } : {}),
+					...(command.cwd ? { cwd: command.cwd } : {}),
+					projectTrustContextFactory: (cwd) => createRpcProjectTrustContext(cwd),
+				});
 				if (!result.cancelled) {
 					await rebindSession();
 				}
@@ -455,6 +477,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					followUpMode: session.followUpMode,
 					sessionFile: session.sessionFile,
 					sessionId: session.sessionId,
+					cwd: session.sessionManager.getCwd(),
 					sessionName: session.sessionName,
 					autoCompactionEnabled: session.autoCompactionEnabled,
 					messageCount: session.messages.length,

@@ -771,6 +771,32 @@ export class InteractiveMode {
 			};
 		}
 
+		const cdCommand = slashCommands.find((command) => command.name === "cd");
+		if (cdCommand) {
+			cdCommand.getArgumentCompletions = async (prefix: string): Promise<AutocompleteItem[] | null> => {
+				const cwd = this.sessionManager.getCwd();
+				const expanded = prefix.startsWith("~") ? path.join(os.homedir(), prefix.slice(1)) : prefix;
+				const absolute = path.resolve(cwd, expanded);
+				const slash = Math.max(absolute.lastIndexOf("/"), absolute.lastIndexOf("\\"));
+				const dir = absolute.slice(0, slash + 1);
+				const partial = absolute.slice(slash + 1);
+				let entries: fs.Dirent[];
+				try {
+					entries = await fs.promises.readdir(dir, { withFileTypes: true });
+				} catch {
+					return null;
+				}
+				const matches = entries
+					.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name.startsWith(partial))
+					.slice(0, 20)
+					.map((entry) => {
+						const value = path.join(dir, entry.name);
+						return { value, label: entry.name, description: path.dirname(value) };
+					});
+				return matches.length > 0 ? matches : null;
+			};
+		}
+
 		const loginCommand = slashCommands.find((command) => command.name === "login");
 		if (loginCommand) {
 			loginCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
@@ -1981,7 +2007,10 @@ export class InteractiveMode {
 				newSession: async (options) => {
 					this.clearStatusIndicator();
 					try {
-						return await this.runtimeHost.newSession(options);
+						return await this.runtimeHost.newSession({
+							...options,
+							projectTrustContextFactory: (cwd) => this.createProjectTrustContext(cwd),
+						});
 					} catch (error: unknown) {
 						return this.handleFatalRuntimeError("Failed to create session", error);
 					}
@@ -3306,6 +3335,12 @@ export class InteractiveMode {
 			if (text === "/new") {
 				this.editor.setText("");
 				await this.handleClearCommand();
+				return;
+			}
+			if (text === "/cd" || text.startsWith("/cd ")) {
+				const target = text.startsWith("/cd ") ? text.slice(4).trim() : undefined;
+				this.editor.setText("");
+				await this.handleCdCommand(target);
 				return;
 			}
 			if (text === "/compact" || text.startsWith("/compact ")) {
@@ -6953,6 +6988,53 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			await this.handleFatalRuntimeError("Failed to create session", error);
+		}
+	}
+
+	/**
+	 * Start a new session in another directory. The transcript stays with the old session;
+	 * the new one re-discovers project resources for the target directory.
+	 */
+	private async handleCdCommand(target: string | undefined): Promise<void> {
+		if (!target) {
+			this.showError("Usage: /cd <directory>");
+			return;
+		}
+
+		const cwd = path.resolve(this.sessionManager.getCwd(), target);
+		if (cwd === this.sessionManager.getCwd()) {
+			this.showStatus("Already here");
+			return;
+		}
+		if (!fs.existsSync(cwd)) {
+			this.showError(`No such directory: ${target}`);
+			return;
+		}
+		try {
+			if (!fs.statSync(cwd).isDirectory()) {
+				this.showError(`Not a directory: ${target}`);
+				return;
+			}
+		} catch {
+			this.showError(`Cannot read directory: ${target}`);
+			return;
+		}
+
+		this.clearStatusIndicator();
+		try {
+			const result = await this.runtimeHost.newSession({
+				cwd,
+				projectTrustContextFactory: (nextCwd) => this.createProjectTrustContext(nextCwd),
+			});
+			if (result.cancelled) {
+				this.showStatus("Directory change cancelled");
+				return;
+			}
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new ThemedText(() => theme.fg("accent", `✓ New session in ${cwd}`), 1, 1));
+			this.ui.requestRender();
+		} catch (error: unknown) {
+			await this.handleFatalRuntimeError("Failed to change directory", error);
 		}
 	}
 

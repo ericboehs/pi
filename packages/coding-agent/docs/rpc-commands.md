@@ -140,6 +140,11 @@ With optional parent session tracking:
 {"type": "new_session", "parentSession": "/path/to/parent-session.jsonl"}
 ```
 
+`cwd` starts the new session in another working directory. Project resources are re-discovered there, and the session file is stored under that directory. A missing directory is an error.
+```json
+{"type": "new_session", "cwd": "/path/to/project"}
+```
+
 Response:
 ```json
 {"type": "response", "command": "new_session", "success": true, "data": {"cancelled": false}}
@@ -176,6 +181,7 @@ Response:
     "sessionFile": "/path/to/session.jsonl",
     "sessionId": "abc123",
     "sessionName": "my-feature-work",
+    "cwd": "/path/to/project",
     "autoCompactionEnabled": true,
     "messageCount": 5,
     "pendingMessageCount": 0

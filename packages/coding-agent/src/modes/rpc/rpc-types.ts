@@ -24,7 +24,7 @@ export type RpcCommand =
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
 	| { id?: string; type: "abort" }
 	| { id?: string; type: "clear_queue" }
-	| { id?: string; type: "new_session"; parentSession?: string }
+	| { id?: string; type: "new_session"; parentSession?: string; cwd?: string }
 
 	// State
 	| { id?: string; type: "get_state" }
@@ -102,6 +102,8 @@ export interface RpcSessionState {
 	followUpMode: "all" | "one-at-a-time";
 	sessionFile?: string;
 	sessionId: string;
+	/** Working directory the session runs in. */
+	cwd: string;
 	sessionName?: string;
 	autoCompactionEnabled: boolean;
 	messageCount: number;

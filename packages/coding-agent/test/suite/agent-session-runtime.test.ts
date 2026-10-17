@@ -291,6 +291,38 @@ describe("AgentSessionRuntime characterization", () => {
 		]);
 	});
 
+	it("starts a new session in another working directory", async () => {
+		const { runtime, tempDir } = await createRuntimeForTest((_pi: ExtensionAPI) => {});
+		await runtime.session.prompt("hello");
+		const originalSessionFile = runtime.session.sessionFile;
+
+		const otherDir = join(tmpdir(), `pi-runtime-cd-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(otherDir, { recursive: true });
+		cleanups.push(() => {
+			if (existsSync(otherDir)) rmSync(otherDir, { recursive: true, force: true });
+		});
+
+		const result = await runtime.newSession({ cwd: otherDir });
+		expect(result.cancelled).toBe(false);
+		// resolvePath does not canonicalize symlinks, so compare resolved paths.
+		expect(realpathSync(runtime.cwd)).toBe(realpathSync(otherDir));
+		expect(realpathSync(runtime.session.sessionManager.getCwd())).toBe(realpathSync(otherDir));
+		expect(runtime.session.messages).toEqual([]);
+		// The new session file lives under the target directory, not the one we left.
+		expect(runtime.session.sessionFile).not.toBe(originalSessionFile);
+		expect(runtime.session.sessionManager.getSessionDir()).not.toContain(realpathSync(tempDir));
+		const encodedOtherDir = runtime.cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
+		expect(runtime.session.sessionManager.getSessionDir()).toContain(encodedOtherDir);
+
+		// A missing directory is an error and leaves the current session in place.
+		const currentSessionFile = runtime.session.sessionFile;
+		await expect(runtime.newSession({ cwd: join(otherDir, "does-not-exist") })).rejects.toThrow(
+			"Directory not found",
+		);
+		expect(runtime.session.sessionFile).toBe(currentSessionFile);
+		expect(realpathSync(runtime.cwd)).toBe(realpathSync(otherDir));
+	});
+
 	it("honors session_before_switch cancellation for new and resume", async () => {
 		const events: RecordedSessionEvent[] = [];
 		let cancelReason: "new" | "resume" | undefined;

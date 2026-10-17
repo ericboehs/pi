@@ -405,9 +405,13 @@ export interface ExtensionCommandContext extends ExtensionContext {
 	/** Wait for the agent to finish streaming */
 	waitForIdle(): Promise<void>;
 
-	/** Start a new session, optionally with initialization. */
+	/**
+	 * Start a new session, optionally with initialization.
+	 * `cwd` starts it in a different working directory, which re-discovers project resources there.
+	 */
 	newSession(options?: {
 		parentSession?: string;
+		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }>;
@@ -2240,6 +2244,7 @@ export interface ExtensionCommandContextActions {
 	waitForIdle: () => Promise<void>;
 	newSession: (options?: {
 		parentSession?: string;
+		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}) => Promise<{ cancelled: boolean }>;

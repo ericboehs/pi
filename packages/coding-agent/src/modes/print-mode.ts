@@ -7,6 +7,7 @@
  */
 
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
+import { createProjectTrustContext } from "../cli/project-trust.ts";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
@@ -77,7 +78,17 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 			mode: mode === "json" ? "json" : "print",
 			commandContextActions: {
 				waitForIdle: () => session.waitForIdle(),
-				newSession: async (newSessionOptions) => runtimeHost.newSession(newSessionOptions),
+				newSession: async (newSessionOptions) =>
+					runtimeHost.newSession({
+						...newSessionOptions,
+						projectTrustContextFactory: (cwd) =>
+							createProjectTrustContext({
+								cwd,
+								mode: mode === "json" ? "json" : "print",
+								settingsManager: session.settingsManager,
+								hasUI: false,
+							}),
+					}),
 				fork: async (entryId, forkOptions) => {
 					const result = await runtimeHost.fork(entryId, forkOptions);
 					return { cancelled: result.cancelled };

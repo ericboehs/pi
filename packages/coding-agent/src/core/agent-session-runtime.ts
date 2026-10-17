@@ -225,19 +225,29 @@ export class AgentSessionRuntime {
 
 	async newSession(options?: {
 		parentSession?: string;
+		/** Working directory for the new session. Defaults to the current one; a different directory starts fresh there. */
+		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+		projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
 	}): Promise<{ cancelled: boolean }> {
 		const beforeResult = await this.emitBeforeSwitch("new");
 		if (beforeResult.cancelled) {
 			return beforeResult;
 		}
 
+		const cwd = options?.cwd ? resolvePath(options.cwd, this.cwd) : this.cwd;
+		if (!existsSync(cwd)) {
+			throw new Error(`Directory not found: ${options?.cwd}`);
+		}
+
 		const previousSessionFile = this.session.sessionFile;
-		const sessionDir = this.session.sessionManager.getSessionDir();
+		// A different cwd gets its own session directory; reusing the current one would file the
+		// session under a directory it does not belong to and hide it from `pi -c` there.
+		const sessionDir = cwd === this.cwd ? this.session.sessionManager.getSessionDir() : undefined;
 		const sessionManager = this.session.sessionManager.isPersisted()
-			? SessionManager.create(this.cwd, sessionDir)
-			: SessionManager.inMemory(this.cwd);
+			? SessionManager.create(cwd, sessionDir)
+			: SessionManager.inMemory(cwd);
 		if (options?.parentSession) {
 			sessionManager.newSession({ parentSession: options.parentSession });
 		}
@@ -245,10 +255,11 @@ export class AgentSessionRuntime {
 		await this.teardownCurrent("new", sessionManager.getSessionFile());
 		this.apply(
 			await this.createRuntime({
-				cwd: this.cwd,
+				cwd,
 				agentDir: this.services.agentDir,
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+				projectTrustContext: options?.projectTrustContextFactory?.(cwd),
 			}),
 		);
 		if (options?.setup) {
