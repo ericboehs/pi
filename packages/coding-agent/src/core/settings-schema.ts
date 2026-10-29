@@ -330,6 +330,12 @@ export const SettingsSchema = Type.Object(
 				description: "Model patterns for cycling, in the same format as the --models CLI flag.",
 			}),
 		),
+		disabledProviders: Type.Optional(
+			Type.Array(Type.String(), {
+				description:
+					"Provider ids hidden from available models (the /model picker, cycling, and startup selection), even when credentials are detected.",
+			}),
+		),
 		defaultTools: Type.Optional(
 			Type.Array(Type.String(), {
 				description:
