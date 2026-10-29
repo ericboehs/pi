@@ -483,6 +483,13 @@
       },
       "description": "Model patterns for cycling, in the same format as the --models CLI flag."
     },
+    "disabledProviders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Provider ids hidden from available models (the /model picker, cycling, and startup selection), even when credentials are detected."
+    },
     "defaultTools": {
       "type": "array",
       "items": {
