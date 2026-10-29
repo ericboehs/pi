@@ -196,6 +196,8 @@ export class ModelRuntime implements Models {
 	private readonly providerAvailabilitySeq = new Map<string, number>();
 	private availabilityError: string | undefined;
 	private readonly credentialOperations = new Map<string, Promise<unknown>>();
+	/** Providers hidden from availability reads (`disabledProviders` setting). */
+	private disabledProviders: ReadonlySet<string> = new Set();
 
 	private constructor(
 		credentials: RuntimeCredentials,
@@ -471,16 +473,37 @@ export class ModelRuntime implements Models {
 		return this.models.getAllModels(providerId);
 	}
 
-	getAvailableOfType<TType extends ModelType>(
+	/**
+	 * Hide providers from every availability read (`getAvailable*`). Their models stay in the
+	 * catalog and keep their credentials, so explicit lookups still resolve.
+	 */
+	setDisabledProviders(providerIds: readonly string[] | undefined): void {
+		this.disabledProviders = new Set(providerIds ?? []);
+	}
+
+	getDisabledProviders(): readonly string[] {
+		return [...this.disabledProviders];
+	}
+
+	isProviderDisabled(providerId: string): boolean {
+		return this.disabledProviders.has(providerId);
+	}
+
+	private withoutDisabled<T extends { provider: string }>(models: readonly T[]): readonly T[] {
+		if (this.disabledProviders.size === 0) return models;
+		return models.filter((model) => !this.disabledProviders.has(model.provider));
+	}
+
+	async getAvailableOfType<TType extends ModelType>(
 		type: TType,
 		providerId?: string,
 		options?: AuthOperationOptions,
 	): Promise<readonly ModelTypeMap[TType][]> {
-		return this.models.getAvailableOfType(type, providerId, options);
+		return this.withoutDisabled(await this.models.getAvailableOfType(type, providerId, options));
 	}
 
-	getAllAvailable(providerId?: string, options?: AuthOperationOptions): Promise<readonly AnyModel[]> {
-		return this.models.getAllAvailable(providerId, options);
+	async getAllAvailable(providerId?: string, options?: AuthOperationOptions): Promise<readonly AnyModel[]> {
+		return this.withoutDisabled(await this.models.getAllAvailable(providerId, options));
 	}
 
 	async checkAuth(providerId: string, options?: AuthOperationOptions): Promise<AuthCheck | undefined> {
@@ -493,7 +516,7 @@ export class ModelRuntime implements Models {
 			try {
 				const available = await this.models.getAvailable(providerId, options);
 				if (errorSeq === this.availabilityErrorSeq) this.availabilityError = undefined;
-				return available;
+				return this.withoutDisabled(available);
 			} catch (error) {
 				if (errorSeq === this.availabilityErrorSeq && !options?.signal?.aborted) {
 					this.availabilityError = error instanceof Error ? error.message : String(error);
@@ -502,11 +525,11 @@ export class ModelRuntime implements Models {
 			}
 		}
 		await this.queueAvailabilityRefresh(options?.signal);
-		return this.snapshot.available;
+		return this.withoutDisabled(this.snapshot.available);
 	}
 
 	getAvailableSnapshot(): readonly Model<Api>[] {
-		return this.snapshot.available;
+		return this.withoutDisabled(this.snapshot.available);
 	}
 
 	getError(): string | undefined {

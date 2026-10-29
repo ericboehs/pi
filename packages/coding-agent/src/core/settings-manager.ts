@@ -1340,6 +1340,11 @@ export class SettingsManager {
 		return this.settings.enabledModels;
 	}
 
+	getDisabledProviders(): string[] {
+		const providers = this.settings.disabledProviders;
+		return Array.isArray(providers) ? providers.filter((provider) => typeof provider === "string") : [];
+	}
+
 	/** The resolved `defaultTools` selection, or undefined when no settings layer sets it. */
 	getDefaultTools(): string[] | undefined {
 		const tools = this.settings.defaultTools;

@@ -3731,6 +3731,7 @@ export class AgentSession {
 				: [];
 		const previousDefaultTools = new Set(getDefaultTools());
 		await this.settingsManager.reload();
+		this._modelRuntime.setDisabledProviders(this.settingsManager.getDisabledProviders());
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		await this._resourceLoader.reload();
