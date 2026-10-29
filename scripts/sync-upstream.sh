@@ -7,7 +7,7 @@
 # Usage: scripts/sync-upstream.sh [--push] [--skip-tests] [--quick-tests]
 #   --push         push main to origin once build and tests pass
 #   --skip-tests   merge and build only
-#   --quick-tests  run only the coding-agent vitest suite instead of ./test.sh
+#   --quick-tests  run only the coding-agent vitest suite (isolated like ./test.sh)
 #
 # Stops on the first failure and leaves the tree as-is so you can inspect it.
 # A merge conflict leaves the merge in progress: resolve and commit, then rerun
@@ -81,8 +81,21 @@ case "$tests" in
 		./test.sh
 		;;
 	quick)
-		step "Testing (coding-agent vitest)"
-		(cd packages/coding-agent && npx vitest --run)
+		step "Testing (coding-agent vitest, isolated like ./test.sh)"
+		# Run vitest outside test.sh's isolated env and tests read real settings, credentials,
+		# and AWS variables (some then hang). Reuse test.sh's env setup, swapping its final
+		# `npm test` for the coding-agent suite.
+		# shellcheck disable=SC2016 # literal text of test.sh's last line
+		last_line='env -i "${test_env[@]}" npm test'
+		[[ "$(tail -n 1 test.sh)" == "$last_line" ]] || die "test.sh no longer ends with: $last_line (update --quick-tests)"
+		quick_script=$(mktemp "${TMPDIR:-/tmp}/pi-quick-test.XXXXXX")
+		trap 'rm -f "$quick_script"' EXIT
+		{
+			sed '$d' test.sh
+			# shellcheck disable=SC2016 # expanded by the generated script
+			printf '%s\n' 'cd packages/coding-agent && env -i "${test_env[@]}" npx vitest --run'
+		} >"$quick_script"
+		bash "$quick_script"
 		;;
 	none) step "Skipping tests" ;;
 esac
