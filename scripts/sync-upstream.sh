@@ -54,7 +54,6 @@ if ! git merge-base --is-ancestor origin/main main; then
 	git merge --ff-only origin/main || die "main and origin/main have diverged; reconcile them first"
 fi
 
-before=$(git rev-parse HEAD)
 behind=$(git rev-list --count main..upstream/main)
 if [[ "$behind" -eq 0 ]]; then
 	step "Already up to date with upstream/main ($(git rev-parse --short upstream/main))"
@@ -67,7 +66,7 @@ else
 	fi
 fi
 
-# Compare against origin/main, not $before: on a rerun after resolving conflicts, $before is
+# Compare against origin/main, not the pre-merge HEAD: on a rerun after resolving conflicts, HEAD is
 # already the merge commit, and the new lockfile would never get installed.
 if ! git diff --quiet origin/main HEAD -- package-lock.json; then
 	step "package-lock.json changed: npm ci --ignore-scripts"
