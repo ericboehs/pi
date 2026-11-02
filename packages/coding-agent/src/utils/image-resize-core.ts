@@ -62,8 +62,8 @@ function encodeCandidate(buffer: Uint8Array, mimeType: string): EncodedCandidate
  *
  * Strategy for staying under maxBytes:
  * 1. First resize to maxWidth/maxHeight
- * 2. Encode PNG and JPEG at the configured quality, keep the smaller one that fits
- * 3. If neither fits, try JPEG with decreasing quality
+ * 2. Try both PNG and JPEG formats, pick the smaller one
+ * 3. If still too large, try JPEG with decreasing quality
  * 4. If still too large, progressively reduce dimensions until 1x1
  */
 export async function resizeImageInProcess(
@@ -134,16 +134,11 @@ export async function resizeImageInProcess(
 		let currentHeight = targetHeight;
 
 		while (true) {
-			const candidates = tryEncodings(currentWidth, currentHeight, qualitySteps);
-			// candidates[0] is PNG and candidates[1] is JPEG at the configured quality. Of those
-			// two, keep the smaller one that fits: returning the first fit kept PNG for photos,
-			// which are often several times larger as PNG. Lower JPEG qualities come after.
-			const [png, preferredJpeg, ...fallbacks] = candidates;
-			const ordered = [png, preferredJpeg]
-				.filter((candidate): candidate is EncodedCandidate => candidate !== undefined)
-				.sort((a, b) => a.encodedSize - b.encodedSize);
-			for (const candidate of [...ordered, ...fallbacks]) {
-				if (candidate.encodedSize < opts.maxBytes) {
+			const [png, jpeg, ...lowerQualityJpegs] = tryEncodings(currentWidth, currentHeight, qualitySteps);
+			// Prefer the smaller of PNG and JPEG at the configured quality; lower JPEG quality only if neither fits.
+			const preferred = jpeg && jpeg.encodedSize < png.encodedSize ? [jpeg, png] : [png, jpeg];
+			for (const candidate of [...preferred, ...lowerQualityJpegs]) {
+				if (candidate && candidate.encodedSize < opts.maxBytes) {
 					return {
 						data: candidate.data,
 						mimeType: candidate.mimeType,

@@ -1,0 +1,8 @@
+# False positives from upstream chord tests: UUIDv7 fixture IDs and the RFC 6455 sample Sec-WebSocket-Key
+packages/chord/test/next-node/http/upgrades.test.ts:generic-api-key:319
+packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:17
+packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:19
+packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:24
+packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:26
+packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:31
+packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:33

@@ -1,4 +1,4 @@
-// A registry on a host (slice 8 §1): its provider, its contributions in table order (`contribution.ts`), the table
+// A registry on a host (slice 8 §1): its provider (replaced or removed by a reload, slice 7b §3), its contributions in table order (`contribution.ts`), the table
 // and its lazy composition (marked when the table changes, composed when read or followed, in the batch's
 // deliveries), the reports of conflicts and failures (once per episode), and the values its readers follow by
 // version.
@@ -38,19 +38,27 @@ export type RegistryError =
 			readonly version: number;
 	  };
 
-/** One registry's value contributed to another: `from`'s table reads `to`. */
-export type RegistryEdge = { readonly from: RegistryRecord; readonly to: RegistryRecord };
-
 /** The provider as served: the defining plugin's version, `compose` and adapters. */
 type Provider = { readonly version: number; readonly provider: RegistryProvider<unknown, unknown> };
 
-/** Where a composition stands: never composed, its last good value, and its failure while `compose` throws. */
+/**
+ * Where a composition stands: never composed, its last good value (with the contributions it was built from), and its
+ * failure while `compose` throws.
+ */
 type Composition = {
-	readonly good: { readonly value: unknown } | undefined;
+	readonly good: { readonly value: unknown; readonly from: readonly RegistryContribution[] } | undefined;
 	readonly failure: { readonly error: unknown } | undefined;
 };
 
 const NEVER: Composition = { good: undefined, failure: undefined };
+
+/**
+ * Checks a registry provider as a setup served it (declaration policy: plugin code is bundled without type checks):
+ * `compose` is a function.
+ */
+export function checkProvider(name: string, provider: RegistryProvider<unknown, unknown>): void {
+	if (typeof provider?.compose !== "function") throw new Error(`registry ${name}: compose is a function`);
+}
 
 /** One registry of a host. */
 export class RegistryRecord {
@@ -59,7 +67,7 @@ export class RegistryRecord {
 	readonly #report: (error: RegistryError) => void;
 	#provider: Provider | undefined;
 	/** The contributions of live contributors, sorted by plugin, then type (a facet's first). */
-	readonly #contributions: RegistryContribution[] = [];
+	#contributions: readonly RegistryContribution[] = [];
 	/** The last table composed, kept so an unchanged table composes nothing. */
 	#table: RegistryTable<unknown> | undefined;
 	#dirty = true;
@@ -68,11 +76,6 @@ export class RegistryRecord {
 	#composing = false;
 	/** The conflicts the last good composition reported, by key: a conflict is reported once per episode. */
 	#conflicts = new Set<string>();
-	/**
-	 * Registries whose values are contributions in this one's table, each with how many: a contribution that would
-	 * close a cycle of them is refused. An edge lives as long as its contribution is in the table.
-	 */
-	readonly #reads = new Map<RegistryRecord, number>();
 	/** The values readers follow, by version; made by the first reader of a version. */
 	readonly #values = new Map<number, RegistryValueSource>();
 
@@ -80,6 +83,12 @@ export class RegistryRecord {
 		this.name = name;
 		this.#batch = batch;
 		this.#report = report;
+	}
+
+	/** The newest registry version its contributions were built against; `undefined` without contributions. */
+	get newestContribution(): number | undefined {
+		if (this.#contributions.length === 0) return undefined;
+		return Math.max(...this.#contributions.map(({ version }) => version));
 	}
 
 	/** The provider's version; `undefined` while none serves it. */
@@ -97,40 +106,38 @@ export class RegistryRecord {
 		return value;
 	}
 
-	/** Serves the registry with `provider` at `version` (the defining plugin's facet); a second serve is refused. */
+	/**
+	 * Serves the registry with `provider` at `version` (the defining plugin's facet, checked by `checkProvider` when
+	 * its setup ran), replacing the provider a reload changed, inside a batch: the table composes again (lazily).
+	 */
 	serve(version: number, provider: RegistryProvider<unknown, unknown>): void {
-		if (this.#provider !== undefined) throw new Error(`registry ${this.name} is served twice`);
-		// Declaration policy: plugin code is bundled without type checks.
-		if (typeof provider?.compose !== "function") throw new Error(`registry ${this.name}: compose is a function`);
 		this.#provider = { version, provider };
-	}
-
-	/** The first composition, at the end of `load`'s setups, inside one batch for every served registry. */
-	composeServed(): void {
-		if (this.#provider === undefined) return;
+		this.#table = undefined;
 		this.#invalidate();
-		this.start();
 	}
 
 	/**
-	 * Refuses a contribution that is `source`'s value when it would close a cycle (declaration policy, at
-	 * `contribute`): through the registries in the tables now and the edges `pending` (the contributing attempt's
-	 * earlier declarations, which enter the tables only once it is live).
+	 * A reload removed the defining plugin, inside a batch: no provider serves it; its readers' values fail
+	 * `unavailable/undeclared` (a reader parked on it waits `not_served`), its contributions stay in the table.
 	 */
-	assertNoCycle(source: RegistryValueSource, pending: readonly RegistryEdge[]): void {
-		const { record } = source;
-		if (record === undefined) return;
-		if (record.#reaches(this, new Set(), pending)) {
-			throw invalid("cycle", `registries ${this.name} and ${record.name} read each other`);
-		}
+	unserve(): void {
+		this.#provider = undefined;
+		this.#table = undefined;
+		this.#composition = NEVER;
+		this.#invalidate();
+	}
+
+	/** The first composition of a served registry, at `load`'s publication or a reload's commit, inside its batch. */
+	composeServed(): void {
+		if (this.#provider === undefined) return;
+		this.start();
 	}
 
 	/** Adds a live contributor's contribution, inside a batch: the table changes. */
 	add(contribution: RegistryContribution): void {
 		const at = this.#contributions.findIndex((other) => compareContributors(contribution, other) < 0);
-		this.#contributions.splice(at < 0 ? this.#contributions.length : at, 0, contribution);
-		const { reads } = contribution;
-		if (reads !== undefined) this.#reads.set(reads, (this.#reads.get(reads) ?? 0) + 1);
+		// A new list per change (contributors come and go rarely): a composition keeps the one it was built from.
+		this.#contributions = this.#contributions.toSpliced(at < 0 ? this.#contributions.length : at, 0, contribution);
 		contribution.follow();
 		this.#invalidate();
 	}
@@ -139,13 +146,7 @@ export class RegistryRecord {
 	remove(contribution: RegistryContribution): void {
 		const at = this.#contributions.indexOf(contribution);
 		if (at < 0) return;
-		this.#contributions.splice(at, 1);
-		const { reads } = contribution;
-		if (reads !== undefined) {
-			const left = this.#reads.get(reads)! - 1;
-			if (left === 0) this.#reads.delete(reads);
-			else this.#reads.set(reads, left);
-		}
+		this.#contributions = this.#contributions.toSpliced(at, 1);
 		contribution.unfollow();
 		this.#invalidate();
 	}
@@ -176,6 +177,20 @@ export class RegistryRecord {
 		return { kind: "value", value: good!.value };
 	}
 
+	/** The contributions the current good composition was built from; `undefined` while there is none. */
+	get composedFrom(): readonly RegistryContribution[] | undefined {
+		return this.#composition.good?.from;
+	}
+
+	/**
+	 * Whether every contribution of `from` (what a composition, or a mapping of it, was built from) is still in the
+	 * table (decision 5: one that left may have closed the native its entry held).
+	 */
+	inTable(from: readonly RegistryContribution[]): boolean {
+		const current = this.#contributions;
+		return from === current || from.every((each) => current.includes(each));
+	}
+
 	/** The adapter mapping the composed value back for readers of `version`; `undefined` when there is none. */
 	valueAdapter(version: number): ((current: never) => unknown) | undefined {
 		return this.#provider?.provider.accepts?.[version]?.value;
@@ -203,8 +218,7 @@ export class RegistryRecord {
 	 */
 	close(): void {
 		for (const contribution of this.#contributions) contribution.unfollow();
-		this.#contributions.length = 0;
-		this.#reads.clear();
+		this.#contributions = [];
 		this.#table = undefined;
 		this.#dirty = false;
 		for (const value of this.#values.values()) value.close();
@@ -226,8 +240,9 @@ export class RegistryRecord {
 
 	/**
 	 * Builds the table and composes it, unless it is the last one composed, entry for entry (`compose` is pure). A
-	 * throw is a failure episode: reported once, the last good composition kept; conflicts are reported once per
-	 * episode, as their message and plugins.
+	 * throw is a failure episode: reported once, the last good composition kept while every contribution it was built
+	 * from is still in the table (decision 5: one whose contributor ended may hold a closed native); conflicts are
+	 * reported once per episode, as their message and plugins.
 	 */
 	#recompose({ version, provider }: Provider): void {
 		this.#dirty = false;
@@ -247,10 +262,14 @@ export class RegistryRecord {
 				value = this.#batch.compute(() => provider.compose(table, context));
 			} catch (error) {
 				if (this.#composition.failure === undefined) this.failed(error);
-				this.#composition = { good: this.#composition.good, failure: { error } };
+				const { good } = this.#composition;
+				this.#composition = {
+					good: good !== undefined && this.inTable(good.from) ? good : undefined,
+					failure: { error },
+				};
 				return;
 			}
-			this.#composition = { good: { value }, failure: undefined };
+			this.#composition = { good: { value, from: this.#contributions }, failure: undefined };
 			for (const [key, conflict] of conflicts) {
 				if (this.#conflicts.has(key)) continue;
 				this.#report({ kind: "registry_conflict", registry: this.name, ...conflict });
@@ -273,19 +292,6 @@ export class RegistryRecord {
 			table.push(entry);
 		}
 		return same && previous!.length === table.length ? previous! : table;
-	}
-
-	/** Whether `target` is reached from here through the tables' edges and `pending`. */
-	#reaches(target: RegistryRecord, visited: Set<RegistryRecord>, pending: readonly RegistryEdge[]): boolean {
-		if (this === target) return true;
-		visited.add(this);
-		for (const next of this.#reads.keys()) {
-			if (!visited.has(next) && next.#reaches(target, visited, pending)) return true;
-		}
-		for (const { from, to } of pending) {
-			if (from === this && !visited.has(to) && to.#reaches(target, visited, pending)) return true;
-		}
-		return false;
 	}
 }
 
