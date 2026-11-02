@@ -67,7 +67,9 @@ else
 	fi
 fi
 
-if [[ "$behind" -gt 0 ]] && ! git diff --quiet "$before" HEAD -- package-lock.json; then
+# Compare against origin/main, not $before: on a rerun after resolving conflicts, $before is
+# already the merge commit, and the new lockfile would never get installed.
+if ! git diff --quiet origin/main HEAD -- package-lock.json; then
 	step "package-lock.json changed: npm ci --ignore-scripts"
 	npm ci --ignore-scripts
 fi
