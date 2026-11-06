@@ -113,6 +113,7 @@ import {
 	sessionEntryToContextMessages,
 	type UsageEntry,
 } from "../../core/session-manager.ts";
+import { stripOuterQuotes } from "../../core/session-name.ts";
 import type { FullscreenExitOutput, TuiMode } from "../../core/settings-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import { getSourcePackageKey, type SourceInfo } from "../../core/source-info.ts";
@@ -6803,7 +6804,7 @@ export class InteractiveMode {
 	}
 
 	private handleNameCommand(text: string): void {
-		const name = text.replace(/^\/name\s*/, "").trim();
+		const name = stripOuterQuotes(text.replace(/^\/name\s*/, ""));
 		if (!name) {
 			const currentName = this.sessionManager.getSessionName();
 			if (currentName) {
