@@ -6,3 +6,6 @@ packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:24
 packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:26
 packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:31
 packages/chord/test/next/schema/stored/archive.jsonl:generic-api-key:33
+# Upstream p2 test fixtures: a throwaway self-signed localhost key and a fake sk-fixture token
+apps/p2/test/p2/fetch.test.ts:private-key:10
+apps/p2/test/p2/tui-login.test.ts:generic-api-key:21
