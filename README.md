@@ -12,7 +12,7 @@
 
 # Pi
 
-> **This is [ericboehs](https://github.com/ericboehs)'s fork.** `main` carries the upstream code plus the additions below; issues and PRs for them belong here, not upstream. See [What's different from upstream](#whats-different-from-upstream) at the bottom of this README for the current diff.
+> **Retired (2026-11-07).** This was [ericboehs](https://github.com/ericboehs)'s fork of [earendil-works/pi](https://github.com/earendil-works/pi). Its additions now live as extensions in [pi-boehsline](https://github.com/ericboehs/pi-boehsline): `/cd` in `extensions/cd`, zstd for Copilot and `disabledProviders` in `extensions/providers`. Use upstream pi with pi-boehsline instead. The rest of this README is upstream's, plus the list of what the fork changed at the bottom.
 
 
 Pi is a minimal, extensible agent harness that you can make your own.
