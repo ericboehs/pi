@@ -214,5 +214,6 @@ MIT
 
 - **`/cd <dir>`** — start a new session in another directory without losing this one, and carry the conversation across the move. `packages/coding-agent/src/core/commands/cd.ts`, plus the follow-up fix that says "continued the conversation".
 - **zstd-compressed Anthropic requests** — Anthropic Messages request bodies are zstd-compressed when the provider supports it (GitHub Copilot does, including private Copilot Enterprise deployments that accept a `zstd` content-encoding). A ~535 KB body uploads ~100 ms faster per turn. Falls back to uncompressed on a 400/415, and remembers the rejection per base URL. Opt out with `compat.requestCompression: "none"`. `packages/ai/src/utils/zstd.ts`, wired in `packages/ai/src/api/anthropic-messages.ts`.
+- **`disabledProviders` setting** — provider ids dropped from every availability read (`/model`, cycling, startup selection), for providers that show up through ambient credentials such as AWS environment variables for Amazon Bedrock. Models stay in the catalog, so explicit lookups still resolve. `packages/coding-agent/src/core/model-runtime.ts`.
 
 Everything else follows upstream `main`; this fork is kept current by merging it in.
